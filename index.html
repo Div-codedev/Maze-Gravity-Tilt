@@ -132,8 +132,8 @@
     let goal = {x: size - 2, y: size - 2};
     let cellSize;
     let tiltX = 0, tiltY = 0;
-    const gravity = 0.4;
-    const friction = 0.97;
+    const gravity = 1.5;
+    const friction = 0.98;
     const maxTilt = Math.PI / 6;
     const maxSpeed = 5;
     let isGameRunning = false;
@@ -420,8 +420,8 @@
       const touch = e.touches[0];
       const deltaX = touch.clientX - touchStartX;
       const deltaY = touch.clientY - touchStartY;
-      tiltY = (deltaX / canvas.width) * maxTilt * 3;
-      tiltX = (deltaY / canvas.height) * maxTilt * 3;
+      tiltY = (deltaX / canvas.width) * maxTilt * 300;
+      tiltX = (deltaY / canvas.height) * maxTilt * 300;
       tiltX = Math.max(-maxTilt, Math.min(maxTilt, tiltX));
       tiltY = Math.max(-maxTilt, Math.min(maxTilt, tiltY));
       touchStartX = touch.clientX;
