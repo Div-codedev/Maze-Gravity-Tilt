@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Maze Gravity Tilt</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet"/>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #121212;
+      font-family: 'Inter', sans-serif;
+      display: flex; justify-content: center; align-items: center;
+      color: #e0e0e0;
+    }
+    canvas {
+      display: block;
+      border-radius: 24px;
+      box-shadow: 0 0 20px rgba(0, 246, 255, 0.3);
+      background: #1a1a1a;
+      max-width: calc(100% - 40px); max-height: calc(100% - 40px);
+    }
+    .ui {
+      position: fixed;
+      top: 16px; right: 16px; left: auto;
+      background: rgba(18, 18, 18, 0.9);
+      padding: 12px 16px;
+      border-radius: 16px;
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 0 12px rgba(0, 246, 255, 0.2);
+      cursor: move;
+      touch-action: none;
+      transition: transform 0.2s ease;
+    }
+    .ui:hover { transform: scale(1.05); }
+    .ui button {
+      background: none;
+      border: none;
+      color: #00f6ff;
+      font-size: 1.2rem;
+      cursor: pointer;
+      transition: color 0.2s ease;
+    }
+    .ui button:hover { color: #7fffff; }
+    .ui .status {
+      font-size: 0.9rem;
+      color: #b0b0b0;
+    }
+    .watermark {
+      position: absolute;
+      bottom: 8px; right: 8px;
+      color: rgba(255,255,255,0.05);
+      font-size: 4rem;
+      font-weight: 600;
+      user-select: none;
+      pointer-events: none;
+    }
+    #popup {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(18, 18, 18, 0.95);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 0 20px rgba(0, 246, 255, 0.4);
+      text-align: center;
+      display: none;
+      z-index: 999;
+    }
+    #popup button {
+      margin-top: 16px;
+      padding: 8px 16px;
+      background: #00f6ff;
+      border: none;
+      border-radius: 12px;
+      color: #121212;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    #popup button:hover { background: #7fffff; }
+    #warning, #permission {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(18, 18, 18, 0.95);
+      border-radius: 24px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 0 20px rgba(255, 82, 82, 0.4);
+      display: none;
+      z-index: 1000;
+    }
+    #permission button {
+      margin: 8px;
+      padding: 8px 16px;
+      background: #00f6ff;
+      border: none;
+      border-radius: 12px;
+      color: #121212;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #permission button:hover { background: #7fffff; }
+  </style>
+</head>
+<body>
+  <canvas id="mazeCanvas"></canvas>
+  <div class="ui" id="ui" role="region" aria-label="Game controls">
+    <button onclick="resetGame()" aria-label="Restart game"><i class="fas fa-redo"></i></button>
+    <div class="status" id="status" aria-live="polite"><i class="fas fa-clock"></i> 0s | <i class="fas fa-coins"></i> 0</div>
+  </div>
+  <div class="watermark">DIV</div>
+  <div id="popup" role="dialog" aria-label="Game over popup"></div>
+  <div id="warning" role="alert">Window too small! Resize to at least 200x200 pixels.</div>
+  <div id="permission" role="alert">
+    Grant device orientation permission or use touch controls.<br/>
+    <button onclick="requestOrientationPermission()">Grant Tilt</button>
+    <button onclick="useTouchControls()">Use Touch</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('mazeCanvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context not supported');
+    const size = 41;
+    let maze = [], coins = [], score = 0, time = 0, timer = null;
+    let ball = {x: 0, y: 0, vx: 0, vy: 0, color: '#00f6ff'};
+    let goal = {x: size - 2, y: size - 2};
+    let cellSize;
+    let tiltX = 0, tiltY = 0;
+    const gravity = 0.4;
+    const friction = 0.97;
+    const maxTilt = Math.PI / 6;
+    const maxSpeed = 5;
+    let isGameRunning = false;
+    let useDeviceOrientation = false;
+
+    window.addEventListener('resize', resizeCanvas);
+    document.addEventListener('DOMContentLoaded', init);
+
+    function initializeMaze() {
+      maze = Array(size).fill().map(() => Array(size).fill(1));
+    }
+
+    function carve(x, y) {
+      maze[x][y] = 0;
+      const stack = [[x, y]];
+      const dirs = [[0,2],[0,-2],[2,0],[-2,0]];
+      while (stack.length) {
+        const [cx, cy] = stack[stack.length - 1];
+        const shuffled = dirs.sort(() => Math.random() - 0.5);
+        let moved = false;
+        for (let [dx, dy] of shuffled) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx > 0 && ny > 0 && nx < size - 1 && ny < size - 1 && maze[nx][ny] === 1) {
+            maze[cx + dx/2][cy + dy/2] = 0;
+            maze[nx][ny] = 0;
+            stack.push([nx, ny]);
+            moved = true;
+            break;
+          }
+        }
+        if (!moved) stack.pop();
+      }
+    }
+
+    function placeCoins() {
+      coins = [];
+      for (let y = 1; y < size - 1; y++) {
+        for (let x = 1; x < size - 1; x++) {
+          if (maze[y][x] === 0 && Math.random() < 0.04) {
+            coins.push({x, y});
+          }
+        }
+      }
+    }
+
+    function drawMaze() {
+  const offsetX = (canvas.width - size * cellSize) / 2;
+  const offsetY = (canvas.height - size * cellSize) / 2;
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  // Path gradient
+  const pathGradient = ctx.createRadialGradient(
+    canvas.width / 2 - offsetX, canvas.height / 2 - offsetY, 0,
+    canvas.width / 2 - offsetX, canvas.height / 2 - offsetY, canvas.width / 2
+  );
+  pathGradient.addColorStop(0, 'rgba(0, 246, 255, 0.1)');
+  pathGradient.addColorStop(1, 'rgba(0, 246, 255, 0)');
+  // Wall gradient
+  const wallGradient = ctx.createRadialGradient(
+    canvas.width / 2 - offsetX, canvas.height / 2 - offsetY, 0,
+    canvas.width / 2 - offsetX, canvas.height / 2 - offsetY, canvas.width / 2
+  );
+  wallGradient.addColorStop(0, 'rgba(74, 90, 92, 0.8)'); // Lighter grayish-blue
+  wallGradient.addColorStop(1, 'rgba(28, 37, 38, 0.5)'); // Darker edge
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      ctx.fillStyle = maze[y][x] ? wallGradient : pathGradient;
+      ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+    }
+  }
+  ctx.fillStyle = '#ffb300';
+  coins.forEach(c => {
+    ctx.beginPath();
+    ctx.arc(c.x * cellSize + cellSize / 2, c.y * cellSize + cellSize / 2, cellSize / 4, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#ffb300';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+  ctx.fillStyle = '#00ff7f';
+  ctx.fillRect(goal.x * cellSize, goal.y * cellSize, cellSize, cellSize);
+  ctx.shadowBlur = 15;
+  ctx.shadowColor = '#00ff7f';
+  ctx.fillRect(goal.x * cellSize, goal.y * cellSize, cellSize, cellSize);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+    function updateBall() {
+      if (!isGameRunning) return;
+      ball.vx += gravity * Math.sin(tiltY);
+      ball.vy += gravity * Math.sin(tiltX);
+      ball.vx *= friction;
+      ball.vy *= friction;
+      const speed = Math.hypot(ball.vx, ball.vy);
+      if (speed > maxSpeed) {
+        ball.vx = (ball.vx / speed) * maxSpeed;
+        ball.vy = (ball.vy / speed) * maxSpeed;
+      }
+
+      const offsetX = (canvas.width - size * cellSize) / 2;
+      const offsetY = (canvas.height - size * cellSize) / 2;
+      let nx = ball.x + ball.vx;
+      let ny = ball.y + ball.vy;
+
+      const points = [
+        [nx + ball.radius, ny], [nx - ball.radius, ny],
+        [nx, ny + ball.radius], [nx, ny - ball.radius]
+      ];
+      let canMoveX = true, canMoveY = true;
+      for (let [px, py] of points) {
+        let cx = Math.floor((px - offsetX) / cellSize);
+        let cy = Math.floor((py - offsetY) / cellSize);
+        if (cy < 0 || cy >= size || cx < 0 || cx >= size || maze[cy][cx] === 1) {
+          if (px !== nx) canMoveX = false;
+          if (py !== ny) canMoveY = false;
+        }
+      }
+      ball.x += canMoveX ? ball.vx : 0;
+      ball.y += canMoveY ? ball.vy : 0;
+      if (!canMoveX) ball.vx *= -0.4;
+      if (!canMoveY) ball.vy *= -0.4;
+
+      coins = coins.filter(c => {
+        const dx = offsetX + c.x * cellSize + cellSize/2;
+        const dy = offsetY + c.y * cellSize + cellSize/2;
+        if (Math.hypot(ball.x - dx, ball.y - dy) < ball.radius + cellSize / 4) {
+          score++;
+          return false;
+        }
+        return true;
+      });
+
+      const cx = Math.floor((ball.x - offsetX) / cellSize);
+      const cy = Math.floor((ball.y - offsetY) / cellSize);
+      if (cx === goal.x && cy === goal.y) {
+        if (timer) clearInterval(timer);
+        timer = null;
+        isGameRunning = false;
+        const popup = document.getElementById('popup');
+        popup.style.display = 'block';
+        popup.innerHTML = `🎉 You Win!<br/>⏱ ${time}s<br/>🪙 ${score}<br/><button onclick="resetGame()">Play Again</button>`;
+      }
+    }
+
+    function drawBall() {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, 2 * Math.PI);
+      ctx.fillStyle = ball.color;
+      ctx.fill();
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = '#00f6ff';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawMaze();
+      updateBall();
+      drawBall();
+      // Tilt indicator
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillRect(canvas.width / 2 - 15, canvas.height / 2 - 15, 30, 30);
+      ctx.fillStyle = '#ff5252';
+      ctx.fillRect(
+        canvas.width / 2 + tiltY * 100 - 5,
+        canvas.height / 2 + tiltX * 100 - 5,
+        10, 10
+      );
+      document.getElementById('status').innerHTML = `<i class="fas fa-clock"></i> ${time}s | <i class="fas fa-coins"></i> ${score}`;
+      if (isGameRunning) requestAnimationFrame(loop);
+    }
+
+    function resetGame() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      time = 0;
+      score = 0;
+      const offsetX = (canvas.width - size * cellSize) / 2;
+      const offsetY = (canvas.height - size * cellSize) / 2;
+      ball.x = offsetX + cellSize + cellSize/2;
+      ball.y = offsetY + cellSize + cellSize/2;
+      ball.vx = ball.vy = 0;
+      ball.radius = cellSize * 0.4;
+      tiltX = tiltY = 0;
+      initializeMaze();
+      carve(1, 1);
+      placeCoins();
+      const popup = document.getElementById('popup');
+      popup.innerHTML = '';
+      popup.style.display = 'none';
+      if (document.getElementById('warning').style.display === 'none' &&
+          document.getElementById('permission').style.display === 'none') {
+        timer = setInterval(() => time++, 1000);
+        isGameRunning = true;
+        loop();
+      }
+    }
+
+    function resizeCanvas() {
+      const margin = 20;
+      const minWindowSize = 200;
+      if (window.innerWidth < minWindowSize || window.innerHeight < minWindowSize) {
+        document.getElementById('warning').style.display = 'block';
+        if (timer) clearInterval(timer);
+        timer = null;
+        isGameRunning = false;
+        return;
+      } else {
+        document.getElementById('warning').style.display = 'none';
+      }
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const availableWidth = window.innerWidth - 2 * margin;
+      const availableHeight = window.innerHeight - 2 * margin;
+      cellSize = Math.min(availableWidth / size, availableHeight / size);
+      cellSize = Math.max(cellSize, 5);
+      ball.radius = cellSize * 0.4;
+      const offsetX = (canvas.width - size * cellSize) / 2;
+      const offsetY = (canvas.height - size * cellSize) / 2;
+      ball.x = offsetX + cellSize + cellSize/2;
+      ball.y = offsetY + cellSize + cellSize/2;
+    }
+
+    function init() {
+      resizeCanvas();
+      if (window.DeviceOrientationEvent && !useDeviceOrientation) {
+        document.getElementById('permission').style.display = 'block';
+      } else if (document.getElementById('warning').style.display === 'none') {
+        resetGame();
+      }
+    }
+
+    function requestOrientationPermission() {
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+          .then(permissionState => {
+            if (permissionState === 'granted') {
+              useDeviceOrientation = true;
+              document.getElementById('permission').style.display = 'none';
+              resetGame();
+            }
+          })
+          .catch(error => {
+            console.error('Permission error:', error);
+            useTouchControls();
+          });
+      } else {
+        useDeviceOrientation = true;
+        document.getElementById('permission').style.display = 'none';
+        resetGame();
+      }
+    }
+
+    function useTouchControls() {
+      useDeviceOrientation = false;
+      document.getElementById('permission').style.display = 'none';
+      resetGame();
+    }
+
+    window.addEventListener('deviceorientation', e => {
+      if (!useDeviceOrientation) return;
+      tiltX = Math.max(-maxTilt, Math.min(maxTilt, (e.beta * Math.PI) / 180));
+      tiltY = Math.max(-maxTilt, Math.min(maxTilt, (e.gamma * Math.PI) / 180));
+      console.log(`Tilt: X=${tiltX.toFixed(2)}, Y=${tiltY.toFixed(2)}`);
+    });
+
+    let touchStartX, touchStartY, isTouching = false;
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (useDeviceOrientation) return;
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      isTouching = true;
+    });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (!isTouching || useDeviceOrientation) return;
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+      tiltY = (deltaX / canvas.width) * maxTilt * 3;
+      tiltX = (deltaY / canvas.height) * maxTilt * 3;
+      tiltX = Math.max(-maxTilt, Math.min(maxTilt, tiltX));
+      tiltY = Math.max(-maxTilt, Math.min(maxTilt, tiltY));
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      console.log(`Touch Tilt: X=${tiltX.toFixed(2)}, Y=${tiltY.toFixed(2)}`);
+    });
+    canvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      isTouching = false;
+      tiltX = tiltY = 0;
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (useDeviceOrientation) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      tiltY = ((mouseX - centerX) / centerX) * maxTilt * 1.5;
+      tiltX = ((mouseY - centerY) / centerY) * maxTilt * 1.5;
+      tiltX = Math.max(-maxTilt, Math.min(maxTilt, tiltX));
+      tiltY = Math.max(-maxTilt, Math.min(maxTilt, tiltY));
+      console.log(`Mouse Tilt: X=${tiltX.toFixed(2)}, Y=${tiltY.toFixed(2)}`);
+    });
+
+    document.addEventListener('keydown', e => {
+      if (useDeviceOrientation) return;
+      const tiltSpeed = 0.08;
+      switch (e.key) {
+        case 'ArrowUp': tiltX = Math.max(tiltX - tiltSpeed, -maxTilt); break;
+        case 'ArrowDown': tiltX = Math.min(tiltX + tiltSpeed, maxTilt); break;
+        case 'ArrowLeft': tiltY = Math.max(tiltY - tiltSpeed, -maxTilt); break;
+        case 'ArrowRight': tiltY = Math.min(tiltY + tiltSpeed, maxTilt); break;
+      }
+    });
+    document.addEventListener('keyup', e => {
+      if (useDeviceOrientation) return;
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        tiltX = tiltY = 0;
+      }
+    });
+
+    function makeUIMovable() {
+      const ui = document.getElementById('ui');
+      let isDragging = false, startX, startY;
+
+      function handleStart(e) {
+        e.preventDefault();
+        isDragging = true;
+        const pos = e.type.includes('touch') ? e.touches[0] : e;
+        startX = pos.clientX - (ui.offsetLeft || parseFloat(ui.style.left) || 0);
+        startY = pos.clientY - (ui.offsetTop || parseFloat(ui.style.top) || 0);
+      }
+
+      function handleMove(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const pos = e.type.includes('touch') ? e.touches[0] : e;
+        ui.style.left = (pos.clientX - startX) + 'px';
+        ui.style.top = (pos.clientY - startY) + 'px';
+        ui.style.right = 'auto';
+      }
+
+      function handleEnd() {
+        isDragging = false;
+      }
+
+      ui.addEventListener('mousedown', handleStart);
+      ui.addEventListener('touchstart', handleStart);
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('touchmove', handleMove);
+      document.addEventListener('mouseup', handleEnd);
+      document.addEventListener('touchend', handleEnd);
+    }
+
+    makeUIMovable();
+  </script>
+</body>
+</html>
