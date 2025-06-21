@@ -224,61 +224,82 @@
 }
 
     function updateBall() {
-      if (!isGameRunning) return;
-      ball.vx += gravity * Math.sin(tiltY);
-      ball.vy += gravity * Math.sin(tiltX);
-      ball.vx *= friction;
-      ball.vy *= friction;
-      const speed = Math.hypot(ball.vx, ball.vy);
-      if (speed > maxSpeed) {
-        ball.vx = (ball.vx / speed) * maxSpeed;
-        ball.vy = (ball.vy / speed) * maxSpeed;
-      }
+  if (!isGameRunning) return;
+  // Update velocity
+  ball.vx += gravity * Math.sin(tiltY);
+  ball.vy += gravity * Math.sin(tiltX);
+  ball.vx *= friction;
+  ball.vy *= friction;
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (speed > maxSpeed) {
+    ball.vx = (ball.vx / speed) * maxSpeed;
+    ball.vy = (ball.vy / speed) * maxSpeed;
+  }
 
-      const offsetX = (canvas.width - size * cellSize) / 2;
-      const offsetY = (canvas.height - size * cellSize) / 2;
-      let nx = ball.x + ball.vx;
-      let ny = ball.y + ball.vy;
+  const offsetX = (canvas.width - size * cellSize) / 2;
+  const offsetY = (canvas.height - size * cellSize) / 2;
+  let nx = ball.x + ball.vx;
+  let ny = ball.y + ball.vy;
 
-      const points = [
-        [nx + ball.radius, ny], [nx - ball.radius, ny],
-        [nx, ny + ball.radius], [nx, ny - ball.radius]
-      ];
-      let canMoveX = true, canMoveY = true;
-      for (let [px, py] of points) {
-        let cx = Math.floor((px - offsetX) / cellSize);
-        let cy = Math.floor((py - offsetY) / cellSize);
-        if (cy < 0 || cy >= size || cx < 0 || cx >= size || maze[cy][cx] === 1) {
-          if (px !== nx) canMoveX = false;
-          if (py !== ny) canMoveY = false;
-        }
-      }
-      ball.x += canMoveX ? ball.vx : 0;
-      ball.y += canMoveY ? ball.vy : 0;
-      if (!canMoveX) ball.vx *= -0.4;
-      if (!canMoveY) ball.vy *= -0.4;
+  // Check collisions for all four ball edges
+  const points = [
+    [nx + ball.radius, ny], [nx - ball.radius, ny], // Left/Right
+    [nx, ny + ball.radius], [nx, ny - ball.radius]  // Top/Bottom
+  ];
+  let canMoveX = true, canMoveY = true;
+  let newX = nx, newY = ny;
 
-      coins = coins.filter(c => {
-        const dx = offsetX + c.x * cellSize + cellSize/2;
-        const dy = offsetY + c.y * cellSize + cellSize/2;
-        if (Math.hypot(ball.x - dx, ball.y - dy) < ball.radius + cellSize / 4) {
-          score++;
-          return false;
-        }
-        return true;
-      });
-
-      const cx = Math.floor((ball.x - offsetX) / cellSize);
-      const cy = Math.floor((ball.y - offsetY) / cellSize);
-      if (cx === goal.x && cy === goal.y) {
-        if (timer) clearInterval(timer);
-        timer = null;
-        isGameRunning = false;
-        const popup = document.getElementById('popup');
-        popup.style.display = 'block';
-        popup.innerHTML = `🎉 You Win!<br/>⏱ ${time}s<br/>🪙 ${score}<br/><button onclick="resetGame()">Play Again</button>`;
-      }
+  for (let [px, py] of points) {
+    let cx = Math.floor((px - offsetX) / cellSize);
+    let cy = Math.floor((py - offsetY) / cellSize);
+    if (cy < 0 || cy >= size || cx < 0 || cx >= size || maze[cy][cx] === 1) {
+      if (px !== nx) canMoveX = false;
+      if (py !== ny) canMoveY = false;
     }
+  }
+
+  // Adjust position to prevent wall penetration
+  if (!canMoveX) {
+    const cellX = Math.floor((ball.x - offsetX) / cellSize);
+    const cellEdgeX = (ball.vx > 0 ? cellX + 1 : cellX) * cellSize + offsetX;
+    newX = ball.vx > 0 ? cellEdgeX - ball.radius : cellEdgeX + ball.radius;
+    ball.vx *= -0.4; // Bounce
+  }
+  if (!canMoveY) {
+    const cellY = Math.floor((ball.y - offsetY) / cellSize);
+    const cellEdgeY = (ball.vy > 0 ? cellY + 1 : cellY) * cellSize + offsetY;
+    newY = ball.vy > 0 ? cellEdgeY - ball.radius : cellEdgeY + ball.radius;
+    ball.vy *= -0.4; // Bounce
+  }
+
+  // Update position only if valid
+  ball.x = canMoveX ? nx : newX;
+  ball.y = canMoveY ? ny : newY;
+
+  // Coin collection
+  coins = coins.filter(c => {
+    const dx = offsetX + c.x * cellSize + cellSize/2;
+    const dy = offsetY + c.y * cellSize + cellSize/2;
+    if (Math.hypot(ball.x - dx, ball.y - dy) < ball.radius + cellSize / 4) {
+      score++;
+      return false;
+    }
+    return true;
+  });
+
+  // Check win condition
+  const cx = Math.floor((ball.x - offsetX) / cellSize);
+  const cy = Math.floor((ball.y - offsetY) / cellSize);
+  if (cx === goal.x && cy === goal.y) {
+    if (timer) clearInterval(timer);
+    timer = null;
+    isGameRunning = false;
+    const popup = document.getElementById('popup');
+    popup.style.display = 'block';
+    popup.innerHTML = `🎉 You Win!<br/>⏱ ${time}s<br/>🪙 ${score}<br/><button onclick="resetGame()">Play Again</button>`;
+  }
+}
+
 
     function drawBall() {
       ctx.save();
